@@ -1,60 +1,53 @@
-\
-    # handlers/api.py
-    import json
-    import os
-    import uuid
-    import boto3
-    import logging
-    from flask import Flask, request, jsonify
-    import awsgi
+import json
+import os
+import boto3
+import logging
 
-    logger = logging.getLogger()
-    logger.setLevel(logging.INFO)
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
 
-    app = Flask(__name__)
+dynamodb = boto3.resource('dynamodb')
+firehose = boto3.client('firehose')
+sns = boto3.client('sns')
 
-    dynamodb = boto3.resource('dynamodb')
-    sqs = boto3.client('sqs')
-    sns = boto3.client('sns')
+NOME_TABELA = os.environ.get('ORDER_TABLE')
+NOME_FIREHOSE = os.environ.get('FIREHOSE_STREAM')
+ARN_TOPICO = os.environ.get('NOTIFY_TOPIC')
 
-    TABLE_NAME = os.environ.get('ORDER_TABLE')
-    QUEUE_NAME = os.environ.get('QUEUE_NAME')
-    TOPIC_ARN = os.environ.get('NOTIFY_TOPIC')
-
-    @app.route('/order', methods=['POST'])
-    def create_order():
+def lambda_handler(event, context):
+    """Worker Lambda acionado pelo SQS. Processa registros da fila."""
+    logger.info('Evento SQS recebido: %s', json.dumps(event))
+    tabela = dynamodb.Table(NOME_TABELA)
+    
+    for registro in event.get('Records', []):
         try:
-            body = request.get_json(force=True) or {}
-            name = body.get("client", "guest")
-            items = body.get("items", [])
-            total = body.get("total", 0.0)
-            order_id = str(uuid.uuid4())
-            order_item = {
-                "id": order_id,
-                "client": name,
-                "items": items,
-                "total": str(total),
-                "delivered": False
-            }
+            corpo = json.loads(registro.get('body') or "{}")
+            pedido_id = corpo.get('id')
 
-            # Persist to DynamoDB
-            table = dynamodb.Table(TABLE_NAME)
-            table.put_item(Item=order_item)
+            # Marca como processado no DynamoDB
+            tabela.update_item(
+                Key={'id': pedido_id},
+                UpdateExpression='SET processado = :p',
+                ExpressionAttributeValues={':p': True}
+            )
+            
+            # Envia para o Firehose para análise (opcional)
+            if NOME_FIREHOSE:
+                dados_para_firehose = json.dumps(corpo) + "\n"
+                firehose.put_record(
+                    DeliveryStreamName=NOME_FIREHOSE, 
+                    Record={'Data': dados_para_firehose.encode('utf-8')}
+                )
 
-            # Resolve queue URL by name and send message
-            queue_url = sqs.get_queue_url(QueueName=QUEUE_NAME)['QueueUrl']
-            sqs.send_message(QueueUrl=queue_url, MessageBody=json.dumps(order_item))
+            # Notifica via SNS (opcional)
+            if ARN_TOPICO:
+                sns.publish(TopicArn=ARN_TOPICO, Message=f"Pedido {pedido_id} foi processado.")
 
-            # Publish to SNS topic (optional)
-            if TOPIC_ARN:
-                sns.publish(TopicArn=TOPIC_ARN, Message=f"New order {order_id} by {name}")
-
-            return jsonify({"id": order_id, "message": "order created"})
-
+            logger.info('Pedido %s processado com sucesso.', pedido_id)
+            
         except Exception as e:
-            logger.exception("Error in create_order endpoint")
-            return jsonify({"error": str(e)}), 500
+            logger.exception('Falha ao processar o registro: %s', e)
+            # Deixa o Lambda/SQS lidar com a nova tentativa e a DLQ (Dead-Letter Queue)
+            raise
 
-    def lambda_handler(event, context):
-        \"\"\"AWS Lambda handler that adapts API Gateway event to Flask via awsgi.\"\"\"
-        return awsgi.response(app, event, context)
+    return {'status': 'ok'}
