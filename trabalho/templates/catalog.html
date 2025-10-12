@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8">
+  <title>Catálogo</title>
+</head>
+<body>
+  <h1>Catálogo Netflix Fake (Ambiente: {{ ambiente }})</h1>
+  <ul>
+    {% for item in catalogo %}
+      <li><strong>{{ item.titulo }}</strong> - {{ item.genero }}</li>
+    {% endfor %}
+  </ul>
+  <a href="/">Voltar</a>
+</body>
+</html>
