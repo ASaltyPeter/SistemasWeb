@@ -10,35 +10,44 @@ dynamodb = boto3.resource('dynamodb')
 firehose = boto3.client('firehose')
 sns = boto3.client('sns')
 
-TABLE_NAME = os.environ.get('ORDER_TABLE')
-FIREHOSE_NAME = os.environ.get('FIREHOSE_STREAM')
-TOPIC_ARN = os.environ.get('NOTIFY_TOPIC')
+NOME_TABELA = os.environ.get('ORDER_TABLE')
+NOME_FIREHOSE = os.environ.get('FIREHOSE_STREAM')
+ARN_TOPICO = os.environ.get('NOTIFY_TOPIC')
 
 def lambda_handler(event, context):
-    """SQS-triggered Lambda worker. Processes records from the queue.
-    Expects event['Records'] with SQS messages.
-    """
-    logger.info('SQS event received: %s', json.dumps(event))
-    table = dynamodb.Table(TABLE_NAME)
-    for record in event.get('Records', []):
+    """Worker Lambda acionado pelo SQS. Processa registros da fila."""
+    logger.info('Evento SQS recebido: %s', json.dumps(event))
+    tabela = dynamodb.Table(NOME_TABELA)
+    
+    for registro in event.get('Records', []):
         try:
-            body = json.loads(record.get('body') or "{}")
-            order_id = body.get('id')
-            # mark as processed in DynamoDB
-            table.update_item(
-                Key={'id': order_id},
-                UpdateExpression='SET processed = :p',
+            corpo = json.loads(registro.get('body') or "{}")
+            pedido_id = corpo.get('id')
+
+            # Marca como processado no DynamoDB
+            tabela.update_item(
+                Key={'id': pedido_id},
+                UpdateExpression='SET processado = :p',
                 ExpressionAttributeValues={':p': True}
             )
-            # send to Firehose for analytics (optional)
-            if FIREHOSE_NAME:
-                firehose.put_record(DeliveryStreamName=FIREHOSE_NAME, Record={'Data': json.dumps(body) + "\n"})
-            # notify via SNS (optional)
-            if TOPIC_ARN:
-                sns.publish(TopicArn=TOPIC_ARN, Message=f"Order {order_id} processed")
-            logger.info('Processed order %s', order_id)
+            
+            # Envia para o Firehose para análise (opcional)
+            if NOME_FIREHOSE:
+                dados_para_firehose = json.dumps(corpo) + "\n"
+                firehose.put_record(
+                    DeliveryStreamName=NOME_FIREHOSE, 
+                    Record={'Data': dados_para_firehose.encode('utf-8')}
+                )
+
+            # Notifica via SNS (opcional)
+            if ARN_TOPICO:
+                sns.publish(TopicArn=ARN_TOPICO, Message=f"Pedido {pedido_id} foi processado.")
+
+            logger.info('Pedido %s processado com sucesso.', pedido_id)
+            
         except Exception as e:
-            logger.exception('Failed to process record: %s', e)
-            # Let Lambda/SQS handle retry and DLQ
+            logger.exception('Falha ao processar o registro: %s', e)
+            # Deixa o Lambda/SQS lidar com a nova tentativa e a DLQ (Dead-Letter Queue)
             raise
+
     return {'status': 'ok'}
