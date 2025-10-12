@@ -1,2 +1,3 @@
+# config_main.py
+DB_URL = "sqlite:///main.db"
 DEBUG = False
-ENV_NAME = 'Produção'
