@@ -1,33 +1,41 @@
-from flask import Flask, render_template
-import os
-
-# Catálogo fake
-catalogo = [
-    {"titulo": "Stranger Things", "genero": "Ficção Científica"},
-    {"titulo": "La Casa de Papel", "genero": "Ação"},
-    {"titulo": "The Witcher", "genero": "Fantasia"},
-    {"titulo": "Breaking Bad", "genero": "Drama"},
-]
+from flask import Flask, jsonify
 
 app = Flask(__name__)
 
-# Carregar ambiente pela variável de ambiente APP_ENV
-env = os.getenv("APP_ENV", "dev")
+# Catálogo fake (em memória)
+catalogo = [
+    {"id": 1, "titulo": "Stranger Things", "genero": "Ficção Científica"},
+    {"id": 2, "titulo": "La Casa de Papel", "genero": "Ação"},
+    {"id": 3, "titulo": "The Witcher", "genero": "Fantasia"},
+    {"id": 4, "titulo": "Breaking Bad", "genero": "Drama"},
+]
 
-if env == "dev":
-    app.config.from_pyfile("config/config_dev.py")
-elif env == "hom":
-    app.config.from_pyfile("config/config_hom.py")
-else:
-    app.config.from_pyfile("config/config_main.py")
-
+# Rota inicial
 @app.route("/")
 def home():
-    return render_template("index.html", ambiente=app.config["ENV_NAME"])
+    return jsonify({"mensagem": "API da Netflix Fake - Bem-vindo!"})
 
+# Rota para listar todo catálogo
 @app.route("/catalogo")
-def catalogo_page():
-    return render_template("catalog.html", catalogo=catalogo, ambiente=app.config["ENV_NAME"])
+def listar_catalogo():
+    return jsonify(catalogo)
+
+# Rota para buscar por ID
+@app.route("/catalogo/<int:item_id>")
+def buscar_por_id(item_id):
+    for item in catalogo:
+        if item["id"] == item_id:
+            return jsonify(item)
+    return jsonify({"erro": "Item não encontrado"}), 404
+
+# Rota para filtrar por gênero
+@app.route("/catalogo/genero/<genero>")
+def filtrar_por_genero(genero):
+    resultado = [item for item in catalogo if item["genero"].lower() == genero.lower()]
+    if resultado:
+        return jsonify(resultado)
+    return jsonify({"erro": "Nenhum item encontrado para esse gênero"}), 404
+
 
 if __name__ == "__main__":
-    app.run(debug=app.config["DEBUG"])
+    app.run(debug=True)
