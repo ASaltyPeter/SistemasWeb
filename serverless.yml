@@ -1,61 +1,114 @@
+# Define o nome do serviço ou da aplicação. Este nome é usado para agrupar
+# os recursos na AWS (ex: no CloudFormation, no nome das funções Lambda, etc.).
 service: sistemasweb-app
 
+# Especifica a versão do Serverless Framework a ser usada.
+# Fixar a versão ajuda a evitar problemas de compatibilidade se o framework for atualizado.
 frameworkVersion: '3'
 
+# A seção 'provider' define as configurações globais para o provedor de nuvem.
 provider:
+  # O provedor de nuvem que será usado. Neste caso, a Amazon Web Services (AWS).
   name: aws
+  # O ambiente de execução para as funções Lambda. Aqui, estamos usando Python 3.9.
   runtime: python3.9
+  # Define o estágio (ou ambiente) do deploy. Pode ser 'dev', 'hom', 'prod', etc.
+  # O valor pode ser passado pela linha de comando (ex: --stage prod),
+  # caso contrário, o valor padrão 'dev' será usado.
   stage: ${opt:stage, 'dev'}
+  # A região da AWS onde os recursos serão criados (ex: Leste dos EUA, N. Virginia).
   region: us-east-1
+
+  # Define variáveis de ambiente que estarão disponíveis para todas as funções Lambda.
   environment:
+    # Passa o nome do estágio atual para dentro das funções.
     STAGE: ${self:provider.stage}
+    # Define o nome da tabela do DynamoDB, usando o estágio para diferenciar os ambientes.
     ORDER_TABLE: orders-${self:provider.stage}
+    # Define o nome da fila SQS.
     QUEUE_NAME: orders-queue-${self:provider.stage}
+    # Define o nome do fluxo de entrega do Kinesis Firehose.
     FIREHOSE_STREAM: firehose-orders-${self:provider.stage}
+    # Define o nome do tópico SNS.
     NOTIFY_TOPIC: notify-topic-${self:provider.stage}
 
+# Esta seção define as funções Lambda da sua aplicação.
 functions:
+  # O nome da primeira função Lambda.
   createOrder:
+    # O 'handler' aponta para o código que será executado.
+    # 'handlers.api.lambda_handler' significa: no arquivo 'handlers/api.py',
+    # execute a função chamada 'lambda_handler'.
     handler: handlers.api.lambda_handler
+    # 'events' define o que aciona (trigger) a execução desta função.
     events:
+      # Este é um gatilho do tipo API Gateway.
       - httpApi:
+          # O caminho (endpoint) da URL que acionará a função.
           path: /order
+          # O método HTTP permitido.
           method: post
+
+  # O nome da segunda função Lambda.
   processOrder:
+    # Aponta para a função 'lambda_handler' no arquivo 'handlers/worker.py'.
     handler: handlers.worker.lambda_handler
+    # O gatilho desta função é uma fila SQS.
     events:
       - sqs:
+          # O 'arn' (Amazon Resource Name) identifica unicamente a fila SQS.
+          # Em vez de colocar o ARN manualmente, usamos uma função do CloudFormation ('Fn::GetAtt')
+          # para pegar o ARN do recurso 'OrderQueue' definido na seção 'resources' abaixo.
           arn:
             Fn::GetAtt:
               - OrderQueue
               - Arn
+          # Define que a função será acionada com um lote de até 5 mensagens da fila por vez.
           batchSize: 5
 
+# A seção 'resources' permite definir recursos de infraestrutura adicionais
+# usando a sintaxe do AWS CloudFormation.
 resources:
   Resources:
+    # Nome lógico do recurso (Tabela de Pedidos).
     OrderTable:
+      # O tipo de recurso da AWS a ser criado.
       Type: AWS::DynamoDB::Table
+      # As propriedades e configurações específicas para este recurso.
       Properties:
+        # O nome físico da tabela, referenciando a variável de ambiente definida acima.
         TableName: ${self:provider.environment.ORDER_TABLE}
+        # Define os atributos (colunas) que serão usados na chave da tabela.
         AttributeDefinitions:
-          - AttributeName: id
-            AttributeType: S
+          - AttributeName: id  # Nome do atributo.
+            AttributeType: S   # Tipo do atributo (S = String).
+        # Define a chave primária da tabela.
         KeySchema:
           - AttributeName: id
-            KeyType: HASH
+            KeyType: HASH    # HASH significa que é a chave de partição.
+        # Define o modo de faturamento como 'pague por requisição', ideal para cargas de trabalho imprevisíveis.
         BillingMode: PAY_PER_REQUEST
+
+    # Nome lógico do recurso (Fila de Pedidos).
     OrderQueue:
       Type: AWS::SQS::Queue
       Properties:
         QueueName: ${self:provider.environment.QUEUE_NAME}
+
+    # Nome lógico do recurso (Tópico de Notificação).
     NotifyTopic:
       Type: AWS::SNS::Topic
       Properties:
         TopicName: ${self:provider.environment.NOTIFY_TOPIC}
+
+    # Nome lógico do recurso (Fluxo de Entrega do Firehose).
     FirehoseStream:
       Type: AWS::KinesisFirehose::DeliveryStream
       Properties:
         DeliveryStreamName: ${self:provider.environment.FIREHOSE_STREAM}
+        # Configuração do destino de entrega dos dados, neste caso, um bucket S3.
         S3DestinationConfiguration:
+          # ATENÇÃO: Substitua pelo ARN do seu bucket S3.
           BucketARN: arn:aws:s3:::your-firehose-bucket-${self:provider.stage}
-          RoleARN: arn:aws:iam::123456789012:role/firehose_delivery_role
+          # ATENÇÃO: Substitua pelo ARN da sua role do IAM com permissões para o Firehose escrever no S3.
+          RoleARN: arn:aws:iam::123456789012:role/firehose_delivery_role 
