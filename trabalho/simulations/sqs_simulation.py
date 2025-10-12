@@ -6,4 +6,6 @@ def enviar_mensagem(mensagem):
     return f"Mensagem enviada para a fila: {mensagem}"
 
 def receber_mensagens():
-    return sqs_fila
+    mensagens = sqs_fila.copy()
+    sqs_fila.clear()  # esvazia após ler
+    return mensagens
