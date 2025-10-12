@@ -1,10 +1,8 @@
-from sqs_simulation import receber_mensagens
+from sqs.sqs_simulation import receber_mensagens
+from database.db import salvar_no_banco
 
-def lambda_handler(event=None, context=None):
+def lambda_handler():
     mensagens = receber_mensagens()
     for msg in mensagens:
         print(f"Lambda processou: {msg}")
-    return {"statusCode": 200, "body": "Mensagens processadas"}
-
-if __name__ == "__main__":
-    lambda_handler()
+        salvar_no_banco(msg)  # salva no banco
